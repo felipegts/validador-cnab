@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Validador Universal CNAB 240</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .drag-active {
+            border-color: #10B981;
+            background-color: #ECFDF5;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans text-slate-800">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-slate-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="bg-emerald-600 text-white p-2 rounded-lg">
+                    <i class="fa-solid fa-file-invoice-dollar text-xl"></i>
+                </div>
+                <h1 class="text-xl font-bold text-slate-800">Validador Universal <span class="font-normal text-slate-500">| CNAB 240</span></h1>
+            </div>
+            
+            <!-- SELETOR DE BANCO -->
+            <div class="flex items-center gap-2">
+                <label for="bankSelect" class="text-sm font-semibold text-slate-600">Layout do Banco:</label>
+                <select id="bankSelect" class="border border-slate-300 rounded-md py-1.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <!-- Preenchido via JavaScript -->
+                </select>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        <!-- Upload Area -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8 mb-8">
+            <div id="drop-zone" class="border-2 border-dashed border-slate-300 rounded-xl p-10 text-center transition-colors duration-200 cursor-pointer hover:bg-slate-50">
+                <i class="fa-solid fa-cloud-arrow-up text-4xl text-emerald-500 mb-4"></i>
+                <h3 class="text-lg font-semibold text-slate-700 mb-1">Clique ou arraste seu arquivo .REM aqui</h3>
+                <p class="text-slate-500 text-sm mb-4">Suporta arquivos de remessa e retorno (.rem, .txt, .ret)</p>
+                <input type="file" id="fileInput" accept=".rem, .REM, .txt, .ret, .RET" class="hidden">
+                <button onclick="document.getElementById('fileInput').click()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2 px-6 rounded-lg transition-colors">
+                    Selecionar Arquivo
+                </button>
+            </div>
+        </div>
+
+        <!-- Results Area -->
+        <div id="results-section" class="hidden space-y-6">
+            
+            <!-- Summary Card -->
+            <div id="summary-card" class="rounded-xl p-6 flex items-start gap-4">
+                <div id="summary-icon" class="text-3xl mt-1"></div>
+                <div>
+                    <h2 id="summary-title" class="text-lg font-bold"></h2>
+                    <p id="summary-text" class="text-sm mt-1"></p>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div id="table-container" class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hidden">
+                <div class="overflow-x-auto max-h-[600px] overflow-y-auto relative">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="sticky top-0 bg-slate-50 shadow-sm z-10">
+                            <tr class="border-b border-slate-200 text-sm text-slate-600">
+                                <th class="px-6 py-4 font-semibold">Segmento</th>
+                                <th class="px-4 py-4 font-semibold text-center">Linha</th>
+                                <th class="px-4 py-4 font-semibold text-center">Posição</th>
+                                <th class="px-6 py-4 font-semibold">Valor Lido</th>
+                                <th class="px-6 py-4 font-semibold">Campo</th>
+                                <th class="px-4 py-4 font-semibold text-center">Status</th>
+                                <th class="px-6 py-4 font-semibold">Mensagem / Tratativa</th>
+                            </tr>
+                        </thead>
+                        <tbody id="errorsTableBody" class="divide-y divide-slate-100 text-sm">
+                            <!-- Detalhamento preenchido via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // =====================================================================
+        // MOTOR DE REGRAS GENÉRICAS
+        // =====================================================================
+        
+        const Regras = {
+            tipoInscricao: () => {
+                return (val) => {
+                    if (!['0', '1', '2'].includes(val)) return 'O tipo de inscrição deve ser 0 (Isento), 1 (CPF) ou 2 (CNPJ).';
+                    return null;
+                };
+            },
+            
+            cpfCnpjLayout: (posTipoIdx, docLength) => {
+                return (val, line) => {
+                    const tipo = line.substring(posTipoIdx - 1, posTipoIdx);
+                    const docTrimmed = val.trim();
+                    
+                    if (tipo === '1' || tipo === '2') {
+                        // Valida se só tem números
+                        if (!/^\d+$/.test(docTrimmed) && docTrimmed !== "") {
+                            return 'O documento deve conter apenas números.';
+                        } 
+                        // Valida tamanho
+                        else if (docTrimmed.length !== docLength) {
+                            return `Deslocamento detectado: Informar a Inscrição com zeros a esquerda para completar ${docLength} posições. Ex: 000XXXXXXXXXXXX. Verifique se o Tipo de Inscrição não invadiu este campo.`;
+                        }
+                        
+                        // Valida deslocamento oculto
+                        if (docTrimmed.length === docLength && !docTrimmed.startsWith('0') && (docTrimmed.startsWith('1') || docTrimmed.startsWith('2'))) {
+                            return `Possível deslocamento. O documento começa com '${docTrimmed[0]}', mas possui ${docLength} posições. Geralmente CPFs e CNPJs devem começar com zeros à esquerda no arquivo para fechar o layout. Verifique se a posição ${posTipoIdx} (Tipo Inscrição) não invadiu este campo.`;
+                        }
+                    }
+                    return null;
+                };
+            }
+        };
+
+        // =====================================================================
+        // DICIONÁRIO DE LAYOUTS DE BANCOS
+        // =====================================================================
+        
+        const cnabLayouts = {
+            'sicredi_240': {
+                name: 'Sicredi (CNAB 240)',
+                lineLength: 240,
+                identifySegment: (line) => {
+                    const tipo = line.substring(7, 8);
+                    if (tipo === '0') return 'HEADER_ARQUIVO';
+                    if (tipo === '1') return 'HEADER_LOTE';
+                    if (tipo === '3') {
+                        const seg = line.substring(13, 14);
+                        if (seg === 'J' && line.substring(17, 19) === '52') return 'SEGMENTO_J_J52';
+                        return `SEGMENTO_${seg}`;
+                    }
+                    return 'OUTROS';
+                },
+                validations: [
+                    {
+                        segments: ['HEADER_ARQUIVO', 'HEADER_LOTE'],
+                        fields: [
+                            { name: 'tipoInscricaoEmpresa', start: 18, end: 18, rule: Regras.tipoInscricao() },
+                            { name: 'numeroInscricaoEmpresa', start: 19, end: 32, rule: Regras.cpfCnpjLayout(18, 14) }
+                        ]
+                    },
+                    {
+                        segments: ['SEGMENTO_B'],
+                        fields: [
+                            { name: 'tipoInscricaoFavorecido', start: 18, end: 18, rule: Regras.tipoInscricao() },
+                            { name: 'cnpjCpfFavorecido', start: 19, end: 32, rule: Regras.cpfCnpjLayout(18, 14) }
+                        ]
+                    },
+                    {
+                        segments: ['SEGMENTO_J_J52'],
+                        fields: [
+                            { name: 'tipoInscricaoPagador', start: 20, end: 20, rule: Regras.tipoInscricao() },
+                            { name: 'cpfOuCnpjPagador', start: 21, end: 35, rule: Regras.cpfCnpjLayout(20, 15) },
+                            { name: 'tipoInscricaoBeneficiario', start: 76, end: 76, rule: Regras.tipoInscricao() },
+                            { name: 'cpfOuCnpjBeneficiario', start: 77, end: 91, rule: Regras.cpfCnpjLayout(76, 15) }
+                        ]
+                    }
+                ]
+            }
+        };
+
+        // =====================================================================
+        // INICIALIZAÇÃO DA INTERFACE
+        // =====================================================================
+        
+        const bankSelect = document.getElementById('bankSelect');
+        Object.keys(cnabLayouts).forEach(key => {
+            const option = document.createElement('option');
+            option.value = key;
+            option.textContent = cnabLayouts[key].name;
+            bankSelect.appendChild(option);
+        });
+
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('fileInput');
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }, false);
+        });
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('drag-active'), false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('drag-active'), false);
+        });
+
+        dropZone.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+        fileInput.addEventListener('change', function() { handleFiles(this.files); });
+
+        function handleFiles(files) {
+            if (files.length === 0) return;
+            const file = files[0];
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const lines = e.target.result.split(/\r?\n/);
+                const selectedLayoutKey = bankSelect.value;
+                executeValidationEngine(lines, file.name, cnabLayouts[selectedLayoutKey]);
+            };
+            reader.readAsText(file);
+        }
+
+        // =====================================================================
+        // MOTOR DE EXECUÇÃO (Agora salva TUDO, erros e acertos)
+        // =====================================================================
+        
+        function executeValidationEngine(lines, fileName, layoutInfo) {
+            let results = []; // Array que armazena todos os testes realizados
+
+            lines.forEach((line, index) => {
+                const lineNumber = index + 1;
+                if (line.trim() === '') return;
+
+                // 1. Validando Estrutura (Tamanho)
+                if (line.length !== layoutInfo.lineLength) {
+                    results.push({
+                        segment: 'ESTRUTURA', line: lineNumber, posStart: 1, posEnd: line.length,
+                        value: `${line.length} carac.`, field: 'Tamanho da Linha', status: 'error',
+                        message: `A linha deve ter exatamente ${layoutInfo.lineLength} caracteres. Verifique quebras de linha/espaços.`
+                    });
+                } else {
+                    results.push({
+                        segment: 'ESTRUTURA', line: lineNumber, posStart: 1, posEnd: line.length,
+                        value: `${line.length} carac.`, field: 'Tamanho da Linha', status: 'success',
+                        message: 'Tamanho correto.'
+                    });
+                }
+
+                if(line.length < 14) return; 
+
+                // 2. Validando Campos do Layout
+                const segmentName = layoutInfo.identifySegment(line);
+                const matchingRules = layoutInfo.validations.filter(v => v.segments.includes(segmentName));
+
+                matchingRules.forEach(ruleSet => {
+                    ruleSet.fields.forEach(field => {
+                        const extractedValue = line.substring(field.start - 1, field.end);
+                        
+                        // Executa a regra
+                        const errorMessage = field.rule(extractedValue, line);
+                        
+                        // Registra o resultado (tanto sucesso quanto erro)
+                        results.push({
+                            segment: segmentName,
+                            line: lineNumber,
+                            posStart: field.start,
+                            posEnd: field.end,
+                            value: extractedValue || '(vazio)',
+                            field: field.name,
+                            status: errorMessage ? 'error' : 'success', // Define se passou no teste
+                            message: errorMessage || 'Validado com sucesso.'
+                        });
+                    });
+                });
+            });
+
+            displayResults(results, fileName, layoutInfo.name);
+        }
+
+        // =====================================================================
+        // RENDERIZAÇÃO DOS RESULTADOS (Lista todos os testes)
+        // =====================================================================
+        
+        function displayResults(results, fileName, bankName) {
+            const resultsSection = document.getElementById('results-section');
+            const summaryCard = document.getElementById('summary-card');
+            const summaryIcon = document.getElementById('summary-icon');
+            const summaryTitle = document.getElementById('summary-title');
+            const summaryText = document.getElementById('summary-text');
+            const tableContainer = document.getElementById('table-container');
+            const tbody = document.getElementById('errorsTableBody');
+            
+            resultsSection.classList.remove('hidden');
+            tbody.innerHTML = '';
+
+            // Verifica se há pelo menos um erro nos resultados
+            const errors = results.filter(r => r.status === 'error');
+
+            // Atualiza o quadro de resumo
+            if (errors.length === 0) {
+                summaryCard.className = 'rounded-xl p-6 flex items-start gap-4 bg-emerald-50 border border-emerald-200 text-emerald-800';
+                summaryIcon.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-500"></i>';
+                summaryTitle.innerText = `Arquivo "${fileName}" validado com sucesso!`;
+                summaryText.innerText = `O layout atende às regras do banco ${bankName}. Veja o detalhamento de todos os campos testados abaixo:`;
+            } else {
+                summaryCard.className = 'rounded-xl p-6 flex items-start gap-4 bg-rose-50 border border-rose-200 text-rose-800';
+                summaryIcon.innerHTML = '<i class="fa-solid fa-circle-exclamation text-rose-500"></i>';
+                summaryTitle.innerText = `Arquivo "${fileName}" possui ${errors.length} erro(s)`;
+                summaryText.innerText = `Foram encontradas inconsistências no layout do banco ${bankName}. Os erros estão destacados em vermelho abaixo:`;
+            }
+
+            // A tabela sempre será exibida agora
+            tableContainer.classList.remove('hidden');
+
+            // Renderiza as linhas da tabela
+            results.forEach(res => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 transition-colors";
+                
+                // Cor da Badge do Segmento
+                let badgeColor = "bg-slate-100 text-slate-700";
+                if(res.segment.includes('J52')) badgeColor = "bg-purple-100 text-purple-700";
+                else if(res.segment.includes('B')) badgeColor = "bg-blue-100 text-blue-700";
+                else if(res.segment === 'ESTRUTURA') badgeColor = "bg-slate-800 text-white";
+
+                // Estilos Condicionais (Sucesso x Erro)
+                const isError = res.status === 'error';
+                const statusIcon = isError ? '<i class="fa-solid fa-xmark text-lg text-rose-500"></i>' : '<i class="fa-solid fa-check text-lg text-emerald-500"></i>';
+                const valueStyle = isError ? 'text-rose-700 bg-rose-100 border border-rose-200' : 'text-emerald-700 bg-emerald-50 border border-emerald-100';
+                const messageStyle = isError ? 'text-rose-600 font-semibold' : 'text-slate-500';
+
+                tr.innerHTML = `
+                    <td class="px-6 py-4"><span class="px-2.5 py-1 rounded-md text-xs font-semibold tracking-wide ${badgeColor}">${res.segment}</span></td>
+                    <td class="px-4 py-4 font-medium text-center">${res.line}</td>
+                    <td class="px-4 py-4 whitespace-nowrap text-center">${res.posStart} a ${res.posEnd}</td>
+                    <td class="px-6 py-4 font-mono text-xs"><span class="px-2 py-1 rounded ${valueStyle}">${res.value}</span></td>
+                    <td class="px-6 py-4 font-medium text-slate-700">${res.field}</td>
+                    <td class="px-4 py-4 text-center">${statusIcon}</td>
+                    <td class="px-6 py-4 text-sm leading-relaxed ${messageStyle}">${res.message}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+    </script>
+</body>
+</html>
