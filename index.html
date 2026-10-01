@@ -103,20 +103,20 @@
                 return (val, line) => {
                     const tipo = line.substring(posTipoIdx - 1, posTipoIdx);
                     const docTrimmed = val.trim();
-                    
+
                     if (tipo === '1' || tipo === '2') {
                         // Valida se só tem números
                         if (!/^\d+$/.test(docTrimmed) && docTrimmed !== "") {
                             return 'O documento deve conter apenas números.';
-                        } 
-                        // Valida tamanho
-                        else if (docTrimmed.length !== docLength) {
-                            return `Deslocamento detectado: Informar a Inscrição com zeros a esquerda para completar ${docLength} posições. Ex: 000XXXXXXXXXXXX. Verifique se o Tipo de Inscrição não invadiu este campo.`;
                         }
-                        
-                        // Valida deslocamento oculto
-                        if (docTrimmed.length === docLength && !docTrimmed.startsWith('0') && (docTrimmed.startsWith('1') || docTrimmed.startsWith('2'))) {
-                            return `Possível deslocamento. O documento começa com '${docTrimmed[0]}', mas possui ${docLength} posições. Geralmente CPFs e CNPJs devem começar com zeros à esquerda no arquivo para fechar o layout. Verifique se a posição ${posTipoIdx} (Tipo Inscrição) não invadiu este campo.`;
+                        // Valida tamanho: campo numérico deve ocupar exatamente docLength posições com zeros à esquerda
+                        if (val.length !== docLength) {
+                            return `Deslocamento detectado: Informar a Inscrição com zeros à esquerda para completar ${docLength} posições. Ex: 000XXXXXXXXXXXX. Verifique se o Tipo de Inscrição não invadiu este campo.`;
+                        }
+                        // Valida deslocamento real: se o campo tem espaços, o tamanho numérico útil é menor que docLength
+                        // e não foi preenchido com zeros à esquerda conforme exigido pelo manual
+                        if (docTrimmed.length < docLength) {
+                            return `Deslocamento detectado: O documento possui ${docTrimmed.length} dígitos, mas o campo exige ${docLength} posições preenchidas com zeros à esquerda.`;
                         }
                     }
                     return null;
